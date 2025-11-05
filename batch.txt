@@ -12,7 +12,28 @@ EFS_MOUNT_DIR="/mnt/efs_data"
 echo "--- 시스템 업데이트(dnf) 및 기본 도구 설치 ---"
 dnf update -y
 # git, python3-pip, EFS 도구 설치
-dnf install -y git python3.11-pip nfs-utils amazon-efs-utils
+dnf install -y git python3.11-pip nfs-utils amazon-efs-utils tmux wget
+
+echo "--- Playwright Chromium 시스템 의존성 설치 ---"
+dnf install -y \
+  alsa-lib \
+  at-spi2-atk \
+  cups-libs \
+  gtk3 \
+  libdrm \
+  libXcomposite \
+  libXdamage \
+  libXext \
+  libXfixes \
+  libXrandr \
+  libXScrnSaver \
+  libXtst \
+  libxkbcommon \
+  libxshmfence \
+  mesa-libgbm \
+  nss \
+  pango \
+  pangocairo
 
 # --- [3] EFS 마운트 (root 권한) ---
 echo "--- EFS 마운트 ---"
@@ -53,10 +74,18 @@ echo "[ec2-user] Poetry 의존성 설치 시작..."
 poetry lock --no-interaction
 poetry install --no-interaction
 
+# --- [6-1] (★Playwright★) 브라우저 바이너리 설치 ---
+echo "[ec2-user] Playwright 브라우저 바이너리 설치 (chromium)..."
+poetry run playwright install chromium
+
 echo "[ec2-user] 사용자 설정 완료."
 EOF
 
 echo "--- 모든 EC2 초기화 스크립트가 성공적으로 완료되었습니다 ---"
 
-# ssh -i "worker1.pem" ec2-user@54.180.115.164
-# nohup poetry run python src/cafe/crawl.py > worker.log 2>&1 &
+# ssh -i "worker1.pem" ec2-user@54.180.99.188
+# ssh -i "worker1.pem" ec2-user@3.37.129.61
+# ssh -i "worker1.pem" ec2-user@3.39.189.218
+# ssh -i "worker1.pem" ec2-user@15.164.224.42
+# ssh -i "worker1.pem" ec2-user@43.200.174.89
+# poetry run python src/cafe/crawl.py

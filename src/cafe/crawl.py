@@ -1,4 +1,5 @@
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from copy import deepcopy
 import json
 import time
@@ -75,10 +76,10 @@ def scrape_reviews_by_api(business_id, max_reviews=10000, cursor=None):
     # API 설정
     API_URL = "https://pcmap-api.place.naver.com/graphql"
     HEADERS = {
-        "Accept": "application/json, text/plain, */*",
-        "Content-Type": "application/json;charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0",
-        "Referer": f"https://pcmap.place.naver.com/restaurant/{business_id}/review/visitor"
+        "Accept": "*/*",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Origin": "https://pcmap.place.naver.com",
+        "Referer": f"https://pcmap.place.naver.com/restaurant/{business_id}/review/visitor",
     }
     payload_template = [
         {
@@ -251,102 +252,119 @@ def scrape_reviews_by_api(business_id, max_reviews=10000, cursor=None):
     all_reviews = []
     is_completed = False
     current_cursor = cursor
-    
-    # 페이징 루프(한번에 50개 씩) 
-    # 위험 요소로 50개 단위 크롤링이므로 최대 리뷰가 50의 배수가 아니라면 초과 가능성
-    # 어짜피 다 크롤링 할 거라 일단 진행
-    while len(all_reviews) < max_reviews:
-        payload_to_send[0]["variables"]["input"]["after"] = current_cursor
-        response = None
-        attempt_count = 0
-        is_429 = False
 
-        # API 요청 재시도 전략
-        while attempt_count < MAX_NETWORK_RETRIES:
-            try:
-                response = requests.post(API_URL, data=json.dumps(payload_to_send), headers=HEADERS, timeout=10)
-
-                if response.status_code == 200:
-                    break
-                elif response.status_code == 429:
-                    default_wait = 540
-                    retry_after = response.headers.get("Retry-After")
-                    retry_after_seconds = default_wait # 기본값으로 설정
-                    
-                    if retry_after:
-                        try:
-                            # 숫자인지 먼저 시도
-                            retry_after_seconds = int(retry_after)
-                        except ValueError:
-                            # 숫자가 아니면 그냥 9분 대기
-                            retry_after_seconds = default_wait
-                    wait_time = min(retry_after_seconds, default_wait) # 9분과 헤더 값 중 작은 시간
-
-                    print(f"429 발생 {wait_time}초 대기...") # 20분 컨트롤 하기 위함
-                    time.sleep(wait_time)
-                    if(is_429):
-                        print("429 2회째 발생, 작업 일시 중지...")
-                        return all_reviews, is_completed
-                    is_429 = True
-                    continue
-                elif response.status_code >= 500:
-                    attempt_count += 1
-                    print(f"서버 오류 ({response.status_code})")
-                    time.sleep(5 * attempt_count)
-                    continue
-                else:
-                    raise Exception(f"클라이언트 또는 예상치 못한 오류 ({response.status_code}): {response.text}")
-
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                attempt_count += 1
-                print(f"네트워크 에러 발생 ({e})")
-                time.sleep(3 * attempt_count)
-                continue
-            except Exception as e:
-                 print(f"치명적 에러 발생: {e}. {business_id} 수집 일시 종료.")
-                 traceback.print_exc()
-                 return all_reviews, is_completed
-
-        # break 안된 경우
-        if attempt_count >= MAX_NETWORK_RETRIES:
-            print(f"최대 재시도 횟수 ({MAX_NETWORK_RETRIES}) 초과. {business_id} 수집 일시 종료.")
-            return all_reviews, is_completed
-
-        # 무조건 성공 전제
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
+        )
         try:
-            data = response.json()
-            reviews_data = data[0].get("data", {}).get("visitorReviews", {})
-            items = reviews_data.get("items", [])
-            
-            if not items:
-                print("더 이상 가져올 리뷰가 없습니다.")
-                is_completed = True
-                break
-
-            for item in items:
-                author_info = item.get("author", {})
-                extracted_data = {
-                    "author_id": author_info.get("id"),
-                    "body": item.get("body"),
-                    "visit_count": item.get("visitCount"),
-                    "visit_time": item.get("representativeVisitDateTime"),
-                    "cursor": item.get("cursor"),
-                }
-                all_reviews.append(extracted_data)
-                
-            current_cursor = items[-1]['cursor']
-            
-            print(f"리뷰 {len(items)}개 수집 완료. (총 {len(all_reviews)}개)")
-            time.sleep(random.uniform(0.5, 1.5)) # 0.5초~1.5초 사이 랜덤 대기
-
-            if random.random() < 0.8: # 80% 확률로 추가 대기
-                time.sleep(random.uniform(0, 3))
-
+            page.goto(f"https://pcmap.place.naver.com/restaurant/{business_id}/review/visitor", wait_until="networkidle")
         except Exception as e:
-            print(f"요청 중 심각한 오류 발생: {e}")
-            traceback.print_exc()
-            break
-            
+            print(f"[{business_id}] 쿠키 획득용 페이지 접속 실패: {e}")
+            browser.close()
+            return [], False
+
+        api_request_context = page.request
+
+        # 페이징 루프(한번에 50개 씩) 
+        # 위험 요소로 50개 단위 크롤링이므로 최대 리뷰가 50의 배수가 아니라면 초과 가능성
+        # 어짜피 다 크롤링 할 거라 일단 진행
+        while len(all_reviews) < max_reviews:
+            payload_to_send[0]["variables"]["input"]["after"] = current_cursor
+            response = None
+            attempt_count = 0
+            is_429 = False
+
+            # API 요청 재시도 전략
+            while attempt_count < MAX_NETWORK_RETRIES:
+                try:
+                    response = api_request_context.post(API_URL, data=payload_to_send, headers=HEADERS, timeout=10000)
+
+                    if response.status == 200:
+                        break
+                    elif response.status == 429:
+                        default_wait = 540
+                        retry_after = response.headers.get("Retry-After")
+                        retry_after_seconds = default_wait # 기본값으로 설정
+                        
+                        if retry_after:
+                            try:
+                                # 숫자인지 먼저 시도
+                                retry_after_seconds = int(retry_after)
+                            except ValueError:
+                                # 숫자가 아니면 그냥 9분 대기
+                                retry_after_seconds = default_wait
+                        wait_time = min(retry_after_seconds, default_wait) # 9분과 헤더 값 중 작은 시간
+
+                        print(f"429 발생 {wait_time}초 대기...") # 20분 컨트롤 하기 위함
+                        time.sleep(wait_time)
+                        if(is_429):
+                            print("429 2회째 발생, 작업 일시 중지...")
+                            browser.close()
+                            return all_reviews, is_completed
+                        is_429 = True
+                        continue
+                    elif response.status >= 500:
+                        attempt_count += 1
+                        print(f"서버 오류 ({response.status})")
+                        time.sleep(5 * attempt_count)
+                        continue
+                    else:
+                        raise Exception(f"클라이언트 또는 예상치 못한 오류 ({response.status}): {response.text()}")
+
+                except PlaywrightTimeoutError as e:
+                    attempt_count += 1
+                    print(f"네트워크 에러 발생 ({e})")
+                    time.sleep(3 * attempt_count)
+                    continue
+                except Exception as e:
+                    print(f"치명적 에러 발생: {e}. {business_id} 수집 일시 종료.")
+                    traceback.print_exc()
+                    browser.close()
+                    return all_reviews, is_completed
+
+            # break 안된 경우
+            if attempt_count >= MAX_NETWORK_RETRIES:
+                print(f"최대 재시도 횟수 ({MAX_NETWORK_RETRIES}) 초과. {business_id} 수집 일시 종료.")
+                browser.close()
+                return all_reviews, is_completed
+
+            # 무조건 성공 전제
+            try:
+                data = response.json()
+                reviews_data = data[0].get("data", {}).get("visitorReviews", {})
+                items = reviews_data.get("items", [])
+                
+                if not items:
+                    print("더 이상 가져올 리뷰가 없습니다.")
+                    is_completed = True
+                    break
+
+                for item in items:
+                    author_info = item.get("author", {})
+                    extracted_data = {
+                        "author_id": author_info.get("id"),
+                        "body": item.get("body"),
+                        "visit_count": item.get("visitCount"),
+                        "visit_time": item.get("representativeVisitDateTime"),
+                        "cursor": item.get("cursor"),
+                    }
+                    all_reviews.append(extracted_data)
+                    
+                current_cursor = items[-1]['cursor']
+                
+                print(f"리뷰 {len(items)}개 수집 완료. (총 {len(all_reviews)}개)")
+                time.sleep(random.uniform(0.5, 1.5)) # 0.5초~1.5초 사이 랜덤 대기
+
+                if random.random() < 0.8: # 80% 확률로 추가 대기
+                    time.sleep(random.uniform(0.5, 3))
+
+            except Exception as e:
+                print(f"요청 중 심각한 오류 발생: {e}")
+                traceback.print_exc()
+                break
+        browser.close()     
     return all_reviews, is_completed
 
 # 반환 값을 string
