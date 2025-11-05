@@ -506,8 +506,8 @@ def main():
                 else:
                     print(f"[{cafe_id}] 작업 실패. 큐에 남겨둡니다 (자동 재시도).")
                 
-                # 다음 카페 작업을 받기 전, 3~6초 랜덤 대기
-                time.sleep(random.uniform(3, 6))
+                # 다음 카페 작업을 받기 전, 20~30초 랜덤 대기
+                time.sleep(random.uniform(20, 30))
             else: 
                 print("큐가 비어있음. '진짜' 작업이 끝났는지 확인 중...")
                 # 큐의 현재 상태 속성을 가져옴

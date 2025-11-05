@@ -32,8 +32,7 @@ dnf install -y \
   libxshmfence \
   mesa-libgbm \
   nss \
-  pango \
-  pangocairo
+  pango
 
 # --- [3] EFS 마운트 (root 권한) ---
 echo "--- EFS 마운트 ---"
@@ -83,9 +82,9 @@ EOF
 
 echo "--- 모든 EC2 초기화 스크립트가 성공적으로 완료되었습니다 ---"
 
-# ssh -i "worker1.pem" ec2-user@54.180.99.188
-# ssh -i "worker1.pem" ec2-user@3.37.129.61
-# ssh -i "worker1.pem" ec2-user@3.39.189.218
-# ssh -i "worker1.pem" ec2-user@15.164.224.42
-# ssh -i "worker1.pem" ec2-user@43.200.174.89
+# ssh -i "worker1.pem" ec2-user@13.209.19.228
+# ssh -i "worker1.pem" ec2-user@52.78.201.242
+# ssh -i "worker1.pem" ec2-user@13.209.70.140
+# ssh -i "worker1.pem" ec2-user@3.37.123.104
+# ssh -i "worker1.pem" ec2-user@52.78.153.244
 # poetry run python src/cafe/crawl.py
