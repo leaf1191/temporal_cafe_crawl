@@ -479,7 +479,7 @@ def main():
                 receipt_handle = message['ReceiptHandle']
                 
                 print(f"--- 작업 시작: [Cafe ID: {cafe_id}] ---")
-                result_status = process_and_save_reviews(cafe_id, total_goal=10000)
+                result_status = process_and_save_reviews(cafe_id, 10000)
                 print(f"작업 결과: [Cafe ID: {cafe_id}] - {result_status}")
 
                 if "SUCCESS_COMPLETED" in result_status or "SKIPPED_COMPLETED" in result_status:

@@ -1,0 +1,62 @@
+#!/bin/bash
+set -e # 한 줄이라도 실패하면 즉시 스크립트 중단
+exec > /var/log/user-data.log 2>&1 # 모든 실행 로그를 파일로 남겨서 디버깅
+
+# --- [1] 사용자 변수 (수정 필요) ---
+REPO_URL="https://github.com/leaf1191/temporal_cafe_crawl.git"
+EFS_ID="fs-0dd77dfd3d6e61bd0"
+PROJECT_DIR="/home/ec2-user/cafe_project"
+EFS_MOUNT_DIR="/mnt/efs_data"
+
+# --- [2] 시스템 패키지 업데이트 및 기본 도구 설치 (root 권한) ---
+echo "--- 시스템 업데이트(dnf) 및 기본 도구 설치 ---"
+dnf update -y
+# git, python3-pip, EFS 도구 설치
+dnf install -y git python3.11-pip nfs-utils amazon-efs-utils
+
+# --- [3] EFS 마운트 (root 권한) ---
+echo "--- EFS 마운트 ---"
+mkdir -p "${EFS_MOUNT_DIR}"
+mount -t efs -o tls "${EFS_ID}:/" "${EFS_MOUNT_DIR}"
+echo "${EFS_ID}:/ ${EFS_MOUNT_DIR} efs _netdev,tls 0 0" >> /etc/fstab
+chown ec2-user:ec2-user "${EFS_MOUNT_DIR}"
+
+# --- [4] GitHub 리포지토리 클론 (root 권한) ---
+# (ec2-user의 홈 디렉터리에 클론)
+echo "--- GitHub 리포지토리 클론 ---"
+git clone "${REPO_URL}" "${PROJECT_DIR}"
+# (아직 소유권을 넘기지 않음)
+
+# --- [5] (★핵심★) 프로젝트 폴더 전체 소유권을 'ec2-user'로 변경 ---
+echo "--- 프로젝트 폴더 소유권을 'ec2-user'로 변경 ---"
+# ec2-user가 이 폴더에서 poetry를 실행할 수 있도록 소유권을 미리 넘김
+chown -R ec2-user:ec2-user "${PROJECT_DIR}"
+
+# --- [6] Poetry 및 의존성 설치 (ec2-user 사용자로 실행) ---
+echo "--- 'ec2-user' 사용자로 전환하여 Python 환경 설정 ---"
+# -i: 로그인 셸로 실행, <<EOF: 따옴표 없이 변수 확장 허용
+sudo -u ec2-user -i <<EOF 
+
+echo "[ec2-user] Poetry 설치 (pipx 사용)"
+# python3로 pipx를 ec2-user 홈에 설치
+pip3.11 install --user pipx
+# ec2-user의 .bashrc에 PATH 추가 (이 셸과 향후 SSH 접속 모두에 적용)
+echo 'export PATH="/home/ec2-user/.local/bin:$PATH"' >> /home/ec2-user/.bashrc
+source /home/ec2-user/.bashrc
+# pipx로 poetry 설치 (ec2-user의 격리된 공간에 설치됨)
+pipx install poetry
+
+echo "[ec2-user] 프로젝트 폴더로 이동"
+cd "${PROJECT_DIR}" # (/home/ec2-user/cafe_project)
+
+echo "[ec2-user] Poetry 의존성 설치 시작..."
+poetry lock --no-interaction
+poetry install --no-interaction
+
+echo "[ec2-user] 사용자 설정 완료."
+EOF
+
+echo "--- 모든 EC2 초기화 스크립트가 성공적으로 완료되었습니다 ---"
+
+# ssh -i "worker1.pem" ec2-user@54.180.115.164
+# nohup poetry run python src/cafe/crawl.py > worker.log 2>&1 &
