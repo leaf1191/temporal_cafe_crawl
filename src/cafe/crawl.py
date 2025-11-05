@@ -355,10 +355,13 @@ def scrape_reviews_by_api(business_id, max_reviews=10000, cursor=None):
                 current_cursor = items[-1]['cursor']
                 
                 print(f"리뷰 {len(items)}개 수집 완료. (총 {len(all_reviews)}개)")
-                time.sleep(random.uniform(0.5, 1.5)) # 0.5초~1.5초 사이 랜덤 대기
+                time.sleep(random.uniform(2, 4)) # 2초~4초 사이 랜덤 대기
 
                 if random.random() < 0.8: # 80% 확률로 추가 대기
                     time.sleep(random.uniform(0.5, 3))
+
+                if random.random() < 0.1: # 10% 확률로 추가 대기
+                    time.sleep(random.uniform(4, 6))
 
             except Exception as e:
                 print(f"요청 중 심각한 오류 발생: {e}")
@@ -506,8 +509,8 @@ def main():
                 else:
                     print(f"[{cafe_id}] 작업 실패. 큐에 남겨둡니다 (자동 재시도).")
                 
-                # 다음 카페 작업을 받기 전, 20~30초 랜덤 대기
-                time.sleep(random.uniform(20, 30))
+                # 다음 카페 작업을 받기 전, 25~35초 랜덤 대기
+                time.sleep(random.uniform(25, 35))
             else: 
                 print("큐가 비어있음. '진짜' 작업이 끝났는지 확인 중...")
                 # 큐의 현재 상태 속성을 가져옴
